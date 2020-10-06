@@ -1,0 +1,434 @@
+---
+title: "Milestone Report (Week 2)"
+subtitle: "Coursera Data Science Capstone"
+author: "Natalia Ravinskaya"
+date: "October 6, 2020"
+output: 
+  html_document:
+    keep_md: yes
+    toc: yes
+    toc_depth: 4
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, cache=FALSE, message=FALSE, warning=FALSE)
+```
+
+## Introduction
+
+The basic goal for our [capstone project](https://www.coursera.org/learn/data-science-project) is to build a predictive model of the English text. When someone is typing several words one by one (for example, "I went to "), the keyboard should present options for what the next word might be.  
+
+This task belongs to the field known as natural language processing and text mining:
+
+- **Natural Language Processing** is interaction between computers and human (natural) languages. Specifically, the process of a computer extracting meaningful information from natural language input and producing natural language output. ([source](https://www.anexinet.com/blog/natural-language-processing-nlp-dummies/))
+- **Text mining** provides a collection of techniques that allows us to derive actionable insights from unstructured data. ([source](https://learn.datacamp.com/courses/intro-to-text-mining-bag-of-words))
+
+The goal of this intermediate report is to describe in plain language (using plots and tables) our exploratory analysis of the provided data.
+
+This report will be focusing on:
+
+- obtaining the data
+- overview of the basic summaries of the loaded data
+- sampling
+- data preprocessing and cleaning 
+- visualization of findings in processed data  
+
+We will use [the bag of words method](https://en.wikipedia.org/wiki/Bag-of-words_model): the text in the provided data will be analyzed as the multiset of its words, disregarding grammar and word order but keeping multiplicity. The frequency of occurrence of each word or some combinations of words will be used as a feature for training a classifier.
+
+## Important note
+
+Please note that according to the terms of the assignment, the report should be written in a brief, concise style, in a way that a non-data scientist manager could evaluate the information provided. Therefore, **we *deliberately* do not display fragments of executable code** in this report, but only the results of code execution: in the form of tables and graphs.
+
+[Here you can see the full source file of this report along with the code in our repository on GitHub.](https://github.com/nravinskaya/MilestoneReport/blob/gh-pages/index.Rmd)
+
+## Data download
+
+This is [the training data](https://d396qusza40orc.cloudfront.net/dsscapstone/dataset/Coursera-SwiftKey.zip) to get us started that will be the basis for most of the capstone. We will use the English database.
+
+```{r dataloading}
+if(!file.exists("./Coursera-SwiftKey.zip")){
+    zipFileUrl <- "https://d396qusza40orc.cloudfront.net/dsscapstone/dataset/Coursera-SwiftKey.zip"
+    download.file(zipFileUrl, destfile="Coursera-SwiftKey.zip", mode="wb")
+}
+if(!file.exists("./final")){
+    unzip(zipfile = "Coursera-SwiftKey.zip")
+}
+
+con <- file("./final/en_US/en_US.blogs.txt", "rb")
+enUSblogs <- readLines(con, encoding="UTF-8", skipNul = T)
+close(con)
+
+con <- file("./final/en_US/en_US.twitter.txt", "rb")
+enUStwitter <- readLines(con, encoding="UTF-8", skipNul = T)
+close(con)
+
+con <- file("./final/en_US/en_US.news.txt", "rb")
+enUSnews <- readLines(con, encoding="UTF-8", skipNul = T)
+close(con)
+
+library(stringi)
+
+tab1 <- data.frame(
+    "Data Source" = c("Blogs", "Twitter", "News"),
+    "Total Size" = c(format(object.size(enUSblogs), "Mb"),
+                     format(object.size(enUStwitter), "Mb"),
+                     format(object.size(enUSnews), "Mb")),
+    "Total Lines" = c(sum(stri_stats_general(enUSblogs)[1]),
+                      sum(stri_stats_general(enUStwitter)[1]),
+                      sum(stri_stats_general(enUSnews)[1])),
+    "Total Words" = c(sum(stri_stats_latex(enUSblogs)[4]),
+                      sum(stri_stats_latex(enUStwitter)[4]),
+                      sum(stri_stats_latex(enUSnews)[4])),
+    "Longest Line" = c(max(nchar(enUSblogs)),
+                       max(nchar(enUStwitter)),
+                       max(nchar(enUSnews))))
+tab1
+```
+
+From the table, we can see that our data consists of three datasets. 
+
+The sizes of the news and blog datasets are about the same, but the data file from Twitter is slightly larger. 
+
+The total number of words in each file is approximately the same. 
+
+The total number of lines in Twitter file is 2.3 times more than in news file, and 2.6 times more than in blogs file. Obviously, this is due to the limitation of the maximum line length in Twitter (140 characters), while in the news dataset the size of the post reaches more than 11 thousand characters, and in blogs dataset as much as 40 thousand.
+
+## Sampling
+
+To build models we don't need to use all of the data. Often relatively few randomly selected rows or chunks need to be included to get an accurate approximation to results that would be obtained using all the data. A representative sample can be used to infer facts about a population. We can use the `rbinom` function to "flip an unbiased coin" to determine whether our sample a line of text or not. 
+
+It will be enough for our research to select 0.5% of random records in each dataset.  
+
+```{r sample}
+
+set.seed(115116)
+
+enUSblogsSample <- enUSblogs[rbinom(length(enUSblogs)*0.005, length(enUSblogs), 0.5)]
+enUStwitterSample <- enUStwitter[rbinom(length(enUStwitter)*0.005, length(enUStwitter), 0.5)]
+enUSnewsSample <- enUSnews[rbinom(length(enUSnews)*0.005, length(enUSnews), 0.5)]
+
+tab2 <- rbind(tab1,
+              data.frame(
+                  "Data Source" = c("Blogs Sample", "Twitter Sample", "News Sample"),
+                  "Total Size" = c(format(object.size(enUSblogsSample), "Mb"),
+                                   format(object.size(enUStwitterSample), "Mb"),
+                                   format(object.size(enUSnewsSample), "Mb")),
+                  "Total Lines" = c(length(enUSblogsSample),
+                                    length(enUStwitterSample),
+                                    length(enUSnewsSample)),
+                  "Total Words" = c(sum(stri_count_words(enUSblogsSample)),
+                                    sum(stri_count_words(enUStwitterSample)),
+                                    sum(stri_count_words(enUSnewsSample))),
+                  "Longest Line" = c(max(nchar(enUSblogsSample)),
+                                     max(nchar(enUStwitterSample)),
+                                     max(nchar(enUSnewsSample)))))
+tab2
+```
+
+The table shows that the number of lines in our sample datasets is about five hundred times less than the original total number of lines. Moreover, the number of words in each example is also about half a percent of the original total number of words.
+
+## Data cleaning
+
+Before we start try to understand the distribution of words and the relationship between words, we will first preprocess and clean our data.
+
+#### 1. Contraction, em dashes, incorrect quotations etc
+
+A quick look at the contents of the files revealed a mess in the use of contraction. For example, "don't" can be written as "don´t". We use `gsub`  base function for pattern replacement to unify this all for the subsequent application of standard text cleaning procedures.
+
+Ditto for quotes and em dashes, hashtags, "at sign" and abbreviations like "1st", "2nd", "3rd", "4th" etc. All this does not give us any useful information, so we must get rid of them. 
+
+```{r gsub}
+gsub_clean <- function(x) {
+    x <- gsub(pattern = "´|'|‘|’", replacement = "'", x)
+    x <- gsub(pattern = "“|”|—|`|#|@|1st|2nd|3rd|[4-9]th", replacement = " ", x)
+    return(x)
+}
+
+enUSblogsSampleGsub <- gsub_clean(enUSblogsSample)
+enUStwitterSampleGsub <- gsub_clean(enUStwitterSample)
+enUSnewsSampleGsub <- gsub_clean(enUSnewsSample)
+```
+
+#### 2. Remove brackets, replace abbreviations, contractions, symbols 
+
+Using functions from `qdap` package, we remove all types of brackets. We then replace  abbreviations and contractions with long forms (e.g., "don't" becomes "do not"), and symbols with word equivalents (e.g., $ becomes "dollar").
+
+```{r qdap}
+library(qdap)
+
+qdap_clean <- function(y) {
+    y <- bracketX(y)
+    y <- replace_abbreviation(y)
+    y <- replace_contraction(y)
+    y <- replace_symbol(y)
+    y <- tolower(y)
+    return(y)
+}
+
+enUSblogsSampleQdap <- qdap_clean(enUSblogsSampleGsub)
+enUStwitterSampleQdap <- qdap_clean(enUStwitterSampleGsub)
+enUSnewsSampleQdap <- qdap_clean(enUSnewsSampleGsub)
+```
+
+#### 3. Translate characters
+
+Base function `tolower` convert upper-case characters to lower-case. This is a very common operation because the data are rarely set up exactly the way we need it for doing the analysis.
+
+#### 4. Convert characters between encodings
+
+Our original downloaded files have been language filtered but may still contain some foreign text. We use `iconv` base function to replace all non-English characters with spaces.
+
+```{r iconv}
+enUSblogsSampleClean <- iconv(enUSblogsSampleQdap, "UTF-8", "ASCII", sub="")
+enUStwitterSampleClean <- iconv(enUStwitterSampleQdap, "UTF-8", "ASCII", sub="")
+enUSnewsSampleClean <- iconv(enUSnewsSampleQdap, "UTF-8", "ASCII", sub="")
+```
+
+## Top 10 Frequent Terms
+
+At this point, we can quickly take a look at the words that appear most frequently in each of our datasets using the `freq_terms` function from `qdap` package.
+
+##### Sample Blogs
+
+```{r plot_freq_terms_blogs, fig.height=2, fig.width=6}
+plot(freq_terms(enUSblogsSampleClean, top = 10), main = "Blogs")
+```
+
+##### Sample Twitter
+
+```{r plot_freq_terms_twitter, fig.height=2, fig.width=4}
+plot(freq_terms(enUStwitterSampleClean, top = 10))
+```
+
+##### Sample News
+
+```{r plot_freq_terms_news, fig.height=2, fig.width=7}
+plot(freq_terms(enUSnewsSampleClean, top = 10))
+```
+
+Next, let's combine all three cleaned example datasets into one and see which words appear most frequently in this combined dataset.
+
+##### Combined dataset
+
+```{r plot_freq_terms_all, fig.height=2, fig.width=10}
+all <- c(enUSblogsSampleClean, enUStwitterSampleClean, enUSnewsSampleClean)
+plot(freq_terms(all, top = 10))
+```
+
+These all plots show that the most frequent words in all datasets (including the combined dataset) were articles, pronouns, prepositions and other *stop words*. There are words that are frequent but provide little information.  
+
+## Data cleaning: the last step
+#### 5. Remove punctuation marks, numbers, stop words and extra whitespaces
+
+Let's take the final step of cleaning our sample datasets using functions from `tm` package. We remove punctuation marks, numbers, stop words and extra whitespaces.
+
+```{r tm}
+library(tm)
+tm_clean <- function(corp) {
+    corp <- tm_map(corp, removePunctuation)
+    corp <- tm_map(corp, removeNumbers)
+    corp <- tm_map(corp, removeWords, stopwords("en"))
+    corp <- tm_map(corp, stripWhitespace)
+    return(corp)
+}
+```
+
+## Commonality cloud
+
+We will now figure out which words in our three datasets are common to all three datasets. We use `commonality.cloud` function from `wordcloud` package to quickly visualize the keywords as a word cloud. 
+
+```{r commonality.cloud}
+library(wordcloud)
+all_a <- paste(enUSblogsSampleClean, collapse = " ")
+all_b <- paste(enUStwitterSampleClean, collapse = " ")
+all_c <- paste(enUSnewsSampleClean, collapse = " ")
+all_abc <- c(all_a, all_b, all_c)
+all_abc <- VectorSource(all_abc)
+all_corp <- VCorpus(all_abc)
+all_clean <- tm_clean(all_corp)
+all_tdm <- TermDocumentMatrix(all_clean)
+all_m <- as.matrix(all_tdm)
+commonality.cloud(all_m, scale = c(5,1.5), colors = brewer.pal(6, "Paired"),
+                  random.order = TRUE, max.words = 40)
+```
+
+The above word cloud clearly shows that “will”, “one” and also “can”, “just”, "new", "get", "time" are the most frequent words at the intersection of these datasets. 
+
+## Comparison cloud
+
+Next, we are interested in which words are often found in one of each data sets, but at the same time in the other two datasets their frequency is significantly lower. We use `comparison.cloud` function from `wordcloud` package to plot a cloud comparing the frequencies of words across datasets.
+
+```{r comparison.cloud}
+colnames(all_tdm) <- c("Blogs", "Twitter", "News")
+all_m <- as.matrix(all_tdm)
+comparison.cloud(all_m, colors = brewer.pal(3, "Set1"),
+                 max.words = 60, rot.per = .2, scale = c(5,1.2),
+                 title.size = 1.75, match.colors = FALSE,
+                 title.bg.colors = "yellow")
+```
+
+## Understanding the frequency of words and word pairs
+
+Now we want to build figures to understand variation in the **frequencies** of words and word pairs in our sample datasets **without stop words**. 
+
+We need these numbers because if we want to pass information about our text to a statistical algorithm, it must first be converted into a form suitable for calculations. One approach to this is to use a *term document matrix* (TDM) - "is a mathematical matrix that describes the frequency of terms that occur in a collection of documents" ([source](https://en.wikipedia.org/wiki/Document-term_matrix)). In TDM, rows correspond to terms (words or word pairs) in the collection and columns correspond to documents (lines from our samples).
+
+Using functions from `tm` package, we build three matrices (one for each of our datasets) and in each of them we sort the ten words that have accumulated the largest number for all records in our dataset. 
+
+Then we do the same, but for the *word pairs* obtained by using the tokenization function from`RWeka` package. "Tokenization is the process of breaking a text string up into words, phrases, symbols, or other meaningful elements called tokens." ([source](https://www.rdocumentation.org/packages/NLP/versions/0.2-0/topics/Tokenizer))
+
+```{r barplots, fig.height=5, fig.width=10}
+blogsCorp <- VCorpus(VectorSource(enUSblogsSampleClean))
+twitterCorp <- VCorpus(VectorSource(enUStwitterSampleClean))
+newsCorp <- VCorpus(VectorSource(enUSnewsSampleClean))
+
+blogsCorpClean <- tm_clean(blogsCorp)
+twitterCorpClean <- tm_clean(twitterCorp)
+newsCorpClean <- tm_clean(newsCorp)
+
+tdmBlogs <- TermDocumentMatrix(blogsCorpClean)
+tdmTwitter <- TermDocumentMatrix(twitterCorpClean)
+tdmNews <- TermDocumentMatrix(newsCorpClean)
+
+tdmBlogsSort <- sort(rowSums(as.matrix(tdmBlogs)), decreasing = TRUE)
+tdmTwitterSort <- sort(rowSums(as.matrix(tdmTwitter)), decreasing = TRUE)
+tdmNewsSort <- sort(rowSums(as.matrix(tdmNews)), decreasing = TRUE)
+
+oneWord <- rbind(tdmBlogsSort[1:10],
+             tdmTwitterSort[1:10],
+             tdmNewsSort[1:10])
+
+library(RWeka)
+
+tokenizer <- function(x) {
+    NGramTokenizer(x, Weka_control(min = 2, max = 2))
+}
+
+blogsTDM2 <- TermDocumentMatrix(
+    blogsCorpClean,
+    control = list(tokenize = tokenizer))
+twitterTDM2 <- TermDocumentMatrix(
+    twitterCorpClean,
+    control = list(tokenize = tokenizer))
+newsTDM2 <- TermDocumentMatrix(
+    newsCorpClean,
+    control = list(tokenize = tokenizer))
+
+blogsTDM2sort <- sort(rowSums(as.matrix(blogsTDM2)), decreasing = TRUE)
+twitterTDM2sort <- sort(rowSums(as.matrix(twitterTDM2)), decreasing = TRUE)
+newsTDM2sort <- sort(rowSums(as.matrix(newsTDM2)), decreasing = TRUE)
+
+bigrams <- rbind(blogsTDM2sort[1:10],
+             twitterTDM2sort[1:10],
+             newsTDM2sort[1:10])
+
+par(mfrow = c(1,2))
+barplot(oneWord, las=2, main = "10 Most common Words",
+        beside = TRUE, horiz = TRUE,
+        col = c("red", "blue", "green"),
+        legend.text = c("blogs", "twitter", "news"),
+        args.legend = list(cex = 1.25, x = "topright"))
+
+barplot(bigrams, las=2, main = "10 Most common Word Pairs",
+        beside = TRUE, horiz = TRUE,
+        col = c("red", "blue", "green"),
+        legend.text = c("blogs", "twitter", "news"),
+        args.legend = list(cex = 1.25, x = "topright"))
+par(mfrow = c(1,1))
+```
+
+For pairs of words, the count is about ten times less than for words. But note that the word "can", which was the second most frequently used as a single word, appears two times in the list of frequent word pairs as "can get" and "can see". 
+
+We will take this observation into account when building our model. By seeing how often one word is followed by another particular word, we can then build a model of the relationships between them.
+
+## 3-grams and 4-grams
+
+"An n-gram is a contiguous sequence of n items from a given sample of text" ([source](https://en.wikipedia.org/wiki/N-gram)) In our case, 3-grams and 4-grams are consecutive sequences of words that we got as a result of the tokenization function.
+
+When constructing the term document matrices for n-grams, the greater the value of n, the greater the number of terms and, accordingly, the greater the number or rows in this TDM. And the more memory is required to process such matrices.
+
+To roughly look at the possible options in our samples, let's go back and generate samples of a smaller size, namely, 0.1% of the original files. This time we will first combine our three sample datasets into one and then preprocess and clean it. At the final step of cleaning we will not delete the stop words. 
+
+```{r threegrams, fig.height=4, fig.width=10}
+## new smaller examples due to large Term Document Matrix sizes with 3-grams and 4-grams 
+## for combined data 
+
+set.seed(116116)
+pr <- 0.001
+combSample <- c(enUSblogs[rbinom(length(enUSblogs)*pr, length(enUSblogs), 0.5)],
+                enUStwitter[rbinom(length(enUStwitter)*pr, length(enUStwitter), 0.5)],
+                enUSnews[rbinom(length(enUSnews)*pr, length(enUSnews), 0.5)])
+
+combSampleGsub <- gsub_clean(combSample)
+combSampleQdap <- qdap_clean(combSampleGsub)
+combSampleClean <- iconv(combSampleQdap, "UTF-8", "ASCII", sub="")
+combSampleCorp <- VCorpus(VectorSource(combSampleClean))
+
+tm_clean2 <- function(corp) {
+    corp <- tm_map(corp, removePunctuation)
+    corp <- tm_map(corp, removeNumbers)
+    corp <- tm_map(corp, stripWhitespace)
+    return(corp)
+}
+
+combSampleCorpClean2 <- tm_clean2(combSampleCorp)
+
+tokenizer <- function(x) {
+    NGramTokenizer(x, Weka_control(min = 3, max = 3))
+}
+
+combSampleTDM32 <- TermDocumentMatrix(
+    combSampleCorpClean2,
+    control = list(tokenize = tokenizer))
+combSampleTDM3sort2 <- sort(rowSums(as.matrix(combSampleTDM32)), decreasing = TRUE)
+#head(as.data.frame(combSampleTDM3sort2), 10)
+
+wfcomb2 <- data.frame(term=names(combSampleTDM3sort2),occurrences=combSampleTDM3sort2)
+
+library(ggplot2)
+
+ggplot(wfcomb2[1:15,], aes(x = reorder(term, -occurrences), y = occurrences))+
+    geom_bar(stat = "identity", width=.5) +
+    coord_flip() +
+    labs(title="3-gram frequency",
+         subtitle="combined data",
+         y="Frequency Count",
+         x="Trigrams (three words)") +
+    theme_minimal()
+```
+
+```{r fourgrams, fig.height=4, fig.width=6}
+tokenizer <- function(x) {
+    NGramTokenizer(x, Weka_control(min = 4, max = 4))
+}
+
+combSampleTDM42 <- TermDocumentMatrix(
+    combSampleCorpClean2,
+    control = list(tokenize = tokenizer))
+combSampleTDM4sort2 <- sort(rowSums(as.matrix(combSampleTDM42)), decreasing = TRUE)
+#head(as.data.frame(combSampleTDM4sort2), 10)
+
+wfcomb3 <- data.frame(term=names(combSampleTDM4sort2),occurrences=combSampleTDM4sort2)
+
+ggplot(wfcomb3[1:13,], aes(x = reorder(term, -occurrences), y = occurrences))+
+    geom_bar(stat = "identity", width=.5) +
+    coord_flip() +
+    labs(title="4-gram frequency",
+         subtitle="combined data",
+         y="Frequency Count",
+         x="4-grams (four words)") +
+    theme_minimal()
+```
+
+For 3-gram, the frequency is about four times higher than for 4-gram.
+
+## Conclusion
+
+Based on all of the above, we consider it important to take into account the following points when creating the predictive model and Shiny app:
+
+- find the optimal sample size so that it does not overload memory, and on the other hand, provides good word coverage.
+- build the term document matrices for single words (1-grams), word pairs (2-grams), 3- and 4-grams.
+- first analyze the last 3 words typed by the user, compare them with our 4-gram matrix, and if nothing is found, use 2 last words and 3-gram matrix, then just the last user typed word and 2-gram matrix. 
+
+Thank you!
